@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-// const SerialInput = @import("./serial_input.zig").SerialInput;
 const StenuraInput = @import("./stenura_input.zig").StenuraInput;
 const Dictionary = @import("./dictionary.zig").Dictionary;
 const DictionaryNode = @import("./dictionary.zig").DictionaryNode;
@@ -19,7 +18,6 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const alloc = gpa.allocator();
 
-    // const input = try StenuraInput.open("/dev/ttyUSB0");
     const device = "/tmp/link";
     const input = StenuraInput.init(alloc, device) catch |e| {
         switch (e) {

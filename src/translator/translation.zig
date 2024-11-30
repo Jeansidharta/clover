@@ -10,8 +10,11 @@ const Translator = @import("./init.zig").Translator;
 
 const TranslationType = union(enum) {
     const Self = @This();
+    /// Should write nothing
     empty,
+    /// Should write what is in the dictionary node
     dictValue: *const DictionaryValue,
+    /// Should write the chord the user typed
     rawChord: Chord,
 
     pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -22,6 +25,7 @@ const TranslationType = union(enum) {
             },
             .rawChord => |chord| {
                 var chordOptions = options;
+                // Forces the chord to be written in its short form
                 chordOptions.width = 0;
                 try chord.format(fmt, chordOptions, writer);
             },
@@ -43,6 +47,8 @@ const TranslationType = union(enum) {
     }
 };
 
+/// A Translation is what should be returned when calling `Translator.translate`.
+/// It should have all the information necessary to write what should be written.
 pub const Translation = struct {
     const Self = @This();
     const WriteValueArr = std.ArrayList(TranslationType);

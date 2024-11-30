@@ -1,3 +1,8 @@
+//! This module provides the logic for communicating with steno machines using the Stenura protocol.
+//! It was written with Plover's code as a basis, which can be found here:
+//! https://github.com/openstenoproject/plover/blob/main/plover/machine/stentura.py
+//! It was written and tested with a Elan Mira G2 steno machine.
+
 const posix = @import("std").posix;
 const Chord = @import("./chords.zig").Chord;
 const ExtendedChord = @import("./chords.zig").ExtendedChord;

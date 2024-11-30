@@ -89,7 +89,7 @@ pub const Dictionary = struct {
 
     pub fn insertChordString(self: *Self, chordKey: []const u8, chordValue: []const u8) !void {
         var chordsSplit = std.mem.splitSequence(u8, chordKey, "/");
-        var lastNodeDict = &self.rootNodeDictionary.dict;
+        var lastNodeDict = &self.rootNodeDictionary.children;
         var lastNode: *DictionaryNode = self.rootNodeDictionary;
         while (chordsSplit.next()) |chordString| {
             const chord = try Chord.fromStenoString(chordString);
@@ -101,7 +101,7 @@ pub const Dictionary = struct {
             };
 
             lastNode = newNode;
-            lastNodeDict = &newNode.dict;
+            lastNodeDict = &newNode.children;
         }
 
         lastNode.value = try DictionaryValue.fromString(self.allocator, chordValue);
@@ -119,7 +119,7 @@ pub const Dictionary = struct {
         } else {
             std.debug.print("|-> {any:0} => NULL\n", .{key});
         }
-        var iterator = node.dict.iterator();
+        var iterator = node.children.iterator();
         while (iterator.next()) |entry| {
             try printNode(entry.value_ptr.*, entry.key_ptr, depth + 1);
         }
@@ -128,7 +128,7 @@ pub const Dictionary = struct {
     // Print the dictionary tree
     pub fn printTree(self: Dictionary) !void {
         std.debug.print("ROOT\n", .{});
-        var iterator = self.rootNodeDictionary.dict.iterator();
+        var iterator = self.rootNodeDictionary.children.iterator();
         while (iterator.next()) |entry| {
             try printNode(entry.value_ptr.*, entry.key_ptr, 0);
         }
@@ -136,37 +136,38 @@ pub const Dictionary = struct {
 };
 
 pub const DictionaryNode = struct {
-    pub const DictType = std.AutoHashMap(Chord, *DictionaryNode);
+    const Self = @This();
+    pub const ChildrenHash = std.AutoHashMap(Chord, *Self);
 
     value: ?DictionaryValue,
-    dict: DictType,
+    children: ChildrenHash,
     alloc: Allocator,
-    parent: ?*DictionaryNode,
+    parent: ?*Self,
 
-    /// Takes ownership of output
-    pub fn createInit(alloc: Allocator, dictValue: ?DictionaryValue) !*DictionaryNode {
+    /// Caller takes ownership of returning pointer
+    pub fn createInit(alloc: Allocator, dictValue: ?DictionaryValue) !*Self {
         const obj = try alloc.create(DictionaryNode);
         obj.* = .{
             .alloc = alloc,
             .value = dictValue,
-            .dict = DictType.init(alloc),
+            .children = ChildrenHash.init(alloc),
             .parent = null,
         };
         return obj;
     }
 
-    pub fn destroy(self: *DictionaryNode) void {
-        self.dict.deinit();
+    pub fn destroy(self: *Self) void {
+        self.children.deinit();
         // TODO - Figure out freeing for the outputs
         // if (self.output) |output| self.alloc.free(output);
         self.alloc.destroy(self);
     }
 
-    pub fn processChord(self: DictionaryNode, chord: Chord) ?*const DictionaryNode {
-        return self.dict.get(chord);
+    pub fn processChord(self: Self, chord: Chord) ?*const Self {
+        return self.children.get(chord);
     }
 
-    pub fn travelUp(self: DictionaryNode, distance: usize) *const DictionaryNode {
+    pub fn travelUp(self: Self, distance: usize) *const Self {
         var node = &self;
         var dist = distance;
         while (dist > 0) {
@@ -178,7 +179,7 @@ pub const DictionaryNode = struct {
     }
 
     /// `depth` is the distance from the root node.
-    pub fn depth(self: DictionaryNode) u8 {
+    pub fn depth(self: Self) u8 {
         var node = &self;
         var dist: u8 = 0;
         while (node.parent) |parent| {
@@ -188,7 +189,7 @@ pub const DictionaryNode = struct {
         return dist;
     }
 
-    pub fn findFirstNonEmptyParent(self: DictionaryNode) ?*DictionaryNode {
+    pub fn findFirstNonEmptyParent(self: Self) ?*DictionaryNode {
         var node = self.parent orelse return null;
         while (node.value == null) {
             node = node.parent orelse return null;
@@ -196,7 +197,7 @@ pub const DictionaryNode = struct {
         return node;
     }
 
-    pub fn format(value: DictionaryNode, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+    pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         if (value.value) |innerValue| {
             return innerValue.format(fmt, options, writer);
         } else {
