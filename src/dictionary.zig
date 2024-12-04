@@ -2,70 +2,303 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chord = @import("./chords.zig").Chord;
 
-pub const DictionaryValue = union(enum) {
+pub const SeenValueType = struct {
+    Raw: bool = false,
+    AttachPrefix: bool = false,
+    AttachInfix: bool = false,
+    AttachSuffix: bool = false,
+    Glue: bool = false,
+    CapitalizeNext: bool = false,
+    CapitalizePrev: bool = false,
+    UncapitalizeNext: bool = false,
+    UncapitalizePrev: bool = false,
+    CarryCapitalization: bool = false,
+    CapsLockMode: bool = false,
+    UppercaseNextWord: bool = false,
+    UppercasePrevWord: bool = false,
+    DoNothing: bool = false,
+    Currency: bool = false,
+    Conditional: bool = false,
+    RepeatLastStroke: bool = false,
+    ToggleAsterisk: bool = false,
+    InsertSpaceBetweenLastStokes: bool = false,
+    RemoveSpaceBetweenLastStokes: bool = false,
+    Command: bool = false,
+};
+
+const ValueType = union(enum) {
     const Self = @This();
 
-    WriteWord: struct {
-        word: []const u8,
-        allocator: Allocator,
-    },
+    const Range = struct {
+        start: usize,
+        len: usize,
+        pub fn init(start: usize, len: usize) Range {
+            return .{ .start = start, .len = len };
+        }
+    };
+
+    Raw: Range,
+    AttachPrefix: Range,
+    AttachInfix: Range,
+    AttachSuffix: Range,
+
+    Glue: Range,
+    CapitalizeNext,
+    CapitalizePrev,
+    UncapitalizeNext,
+    UncapitalizePrev,
+    CarryCapitalization: Range,
+    CapsLockMode,
+    UppercaseNextWord,
+    UppercasePrevWord,
+    DoNothing,
+    Currency: struct { prefix: Range, suffix: Range },
+    Conditional: struct { regex: Range, ifTrue: Range, ifFalse: Range },
+
+    // Macros
+    RepeatLastStroke,
+    ToggleAsterisk,
+    InsertSpaceBetweenLastStokes,
+    RemoveSpaceBetweenLastStokes,
     Undo,
+
+    // TODO implement properly commnads, as specified here:
+    // https://plover.wiki/index.php/Dictionary_format#Keyboard_Shortcuts
+    Command,
+
+    // pub fn charLength(self: Self) usize {
+    //     switch (self) {
+    //         .Glue => |range| range.len,
+    //         .CapitalizeNext => 0,
+    //         .CapitalizePrev => 0,
+    //         .UncapitalizeNext => 0,
+    //         .UncapitalizePrev => 0,
+    //         .CarryCapitalization => |range| range.len,
+    //         .CapsLockMode => 0,
+    //         .UppercaseNextWord => 0,
+    //         .UppercasePrevWord => 0,
+    //         .DoNothing => 0,
+    //         .Currency => |currencyStruct| {},
+    //         .Conditional => |conditionalStruct| {},
+    //         .RepeatLastStroke => 0,
+    //         .ToggleAsterisk => 0,
+    //         .InsertSpaceBetweenLastStokes => 0,
+    //         .RemoveSpaceBetweenLastStokes => 0,
+    //         .Command => 0,
+    //     }
+    // }
+};
+
+pub const DictionaryValue = struct {
+    const Self = @This();
+    const ValueTypeList = std.ArrayList(ValueType);
+
+    allocator: Allocator,
+    rawString: []const u8,
+    types: ValueTypeList,
+
+    fn seenTypes(self: Self) SeenValueType {
+        var seenValueType: SeenValueType = .{};
+        blk: for (self.types.items) |item| {
+            inline for (@typeInfo(ValueType).@"enum".fields) |field| {
+                if (item == field) {
+                    @field(seenValueType, field.name) = true;
+                    continue :blk;
+                }
+            }
+        }
+        return null;
+    }
+
+    pub fn writeTo(self: Self, writerType: type, writer: writerType) !void {
+        switch (self) {
+            .WriteWord => |word| {
+                _ = try writer.writeByte(' ');
+                _ = try writer.write(word.word);
+            },
+        }
+    }
+
+    // TODO: implement friendly command names:
+    // https://plover.wiki/index.php/Dictionary_format#Escaping_Special_Characters
+    // TODO: implement modes
+    // https://plover.wiki/index.php/Dictionary_format#Output_Modes
+    fn parseTypeString(string: []const u8, offset: usize) !ValueType {
+        const startsWith = std.mem.startsWith;
+        const endsWith = std.mem.endsWith;
+        const eql = std.mem.eql;
+
+        if (string.len == 0) return .{ .DoNothing = {} };
+        if (startsWith(u8, string, "~|")) {
+            return .{ .CarryCapitalization = .init(offset + 2, string.len) };
+        }
+        if (startsWith(u8, string, "^~|") and endsWith(u8, string, "^")) {
+            return .{ .CarryCapitalization = .init(offset + 3, string.len - 1) };
+        }
+        if (startsWith(u8, string, "^") and endsWith(u8, string, "^")) {
+            return .{ .AttachInfix = .init(offset + 1, string.len - 1) };
+        }
+        if (startsWith(u8, string, "^")) {
+            return .{ .AttachPrefix = .init(offset + 1, string.len) };
+        }
+        if (endsWith(u8, string, "^")) {
+            return .{ .AttachSuffix = .init(offset, string.len - 1) };
+        }
+        if (endsWith(u8, string, "&")) {
+            return .{ .Glue = .init(offset + 1, string.len) };
+        }
+        if (eql(u8, string, "-|")) {
+            return .{ .CapitalizeNext = {} };
+        }
+        if (eql(u8, string, "*-|")) {
+            return .{ .CapitalizePrev = {} };
+        }
+        if (eql(u8, string, ">")) {
+            return .{ .CapitalizeNext = {} };
+        }
+        if (eql(u8, string, "*>")) {
+            return .{ .CapitalizePrev = {} };
+        }
+        if (eql(u8, string, "*>")) {
+            return .{ .CapitalizePrev = {} };
+        }
+        if (eql(u8, string, "#Caps_Lock") or eql(u8, string, "#caps_lock")) {
+            return .{ .CapsLockMode = {} };
+        }
+        if (eql(u8, string, "<")) {
+            return .{ .UppercaseNextWord = {} };
+        }
+        if (eql(u8, string, "*<")) {
+            return .{ .UppercasePrevWord = {} };
+        }
+        if (startsWith(u8, string, "*(") and endsWith(u8, string, ")")) {
+            const currencySpec = string[2 .. string.len - 1];
+            const currencyLetterPos = std.mem.indexOf(u8, currencySpec, "c") orelse return error.CurrencyMissingC;
+            return .{ .Currency = .{
+                .prefix = .init(offset + 2, currencyLetterPos),
+                .suffix = .init(offset + 3 + currencyLetterPos, currencySpec.len - 1 - currencyLetterPos),
+            } };
+        }
+        if (startsWith(u8, string, "=")) {
+            var splitIter = std.mem.splitScalar(u8, string, '/');
+            const regex = splitIter.next() orelse return error.ConditionalMissingRegex;
+            const ifTrue = splitIter.next() orelse return error.ConditionalMissingIfTrue;
+            const ifFalse = splitIter.next() orelse return error.ConditionalMissingIfFalse;
+            return .{ .Conditional = .{
+                .regex = .init(offset + 1, regex.len + 1),
+                .ifTrue = .init(offset + 2 + regex.len, ifTrue.len),
+                .ifFalse = .init(offset + 3 + regex.len + ifTrue.len, ifFalse.len),
+            } };
+        }
+        return error.unknown;
+    }
+
+    // TODO: Implement escaping, as specified here:
+    // https://plover.wiki/index.php/Dictionary_format#Escaping_Special_Characters
+    fn parseTypes(allocator: Allocator, rawString: []const u8) !ValueTypeList {
+        var types = ValueTypeList.init(allocator);
+        errdefer types.deinit();
+
+        var firstCharInBraces: ?usize = null;
+        var firstCharOutsideBraces: usize = 0;
+        for (rawString, 0..) |char, index| {
+            switch (char) {
+                '{' => {
+                    if (firstCharOutsideBraces != index)
+                        try types.append(.{ .Raw = .{
+                            .start = firstCharOutsideBraces,
+                            .len = index - firstCharOutsideBraces,
+                        } });
+                    if (firstCharInBraces) |_| return error.cannotNestType;
+                    firstCharInBraces = index + 1;
+                },
+                '}' => if (firstCharInBraces) |f| {
+                    try types.append(try parseTypeString(rawString[f..index], f));
+                    firstCharInBraces = null;
+                    firstCharOutsideBraces = index + 1;
+                } else return error.MissingOpenBracket,
+                else => {},
+            }
+        }
+        if (firstCharInBraces) |_| return error.MissingCloseBracket;
+        if (firstCharOutsideBraces != rawString.len - 1) {
+            try types.append(.{
+                .Raw = .{
+                    .start = firstCharOutsideBraces,
+                    .len = rawString.len - firstCharOutsideBraces - 1,
+                },
+            });
+        }
+        return types;
+    }
 
     /// Does not take ownership of string
     pub fn fromString(allocator: Allocator, string: []const u8) !DictionaryValue {
-        if (std.mem.eql(u8, string, "=undo")) {
-            return .{ .Undo = void{} };
-        } else {
-            return .{
-                .WriteWord = .{
-                    .word = try allocator.dupe(u8, string),
-                    .allocator = allocator,
-                },
-            };
-        }
+        const types =
+            if (std.mem.eql(u8, string, "=undo"))
+        blk: {
+            var list = ValueTypeList.init(allocator);
+            try list.append(.Undo);
+            break :blk list;
+        } else try parseTypes(allocator, string);
+
+        return .{
+            .allocator = allocator,
+            .rawString = try allocator.dupe(u8, string),
+            .types = types,
+        };
     }
 
-    pub fn deinit(self: *DictionaryValue) void {
-        switch (self) {
-            .WriteWord => |writeWord| {
-                writeWord.allocator.free(writeWord.word);
-            },
-            _ => {},
-        }
-    }
+    // TODO: proper deinit
+    pub fn deinit(_: *DictionaryValue) void {}
 
-    pub fn toString(self: DictionaryValue) ?[]const u8 {
-        switch (self) {
-            .WriteWord => |writeWord| {
-                return writeWord.word;
-            },
-            _ => {
-                return null;
-            },
-        }
-    }
+    // pub fn charactersLen(self: DictionaryValue) usize {
+    //     switch (self.types) {
+    //         .Raw => return self.rawString.len,
+    //         .Undo => 0,
+    //         .ValueTypeList => |list| {
+    //             var sum: usize = 0;
+    //             for (list.items) |valueType| {
+    //                 sum += valueType.charLength();
+    //             }
+    //             return sum;
+    //         },
+    //     }
+    // }
 
-    pub fn charactersLen(self: DictionaryValue) usize {
-        switch (self) {
-            .WriteWord => |writeWord| {
-                return writeWord.word.len;
-            },
-            .Undo => {
-                return 0;
-            },
-        }
-    }
-
-    pub fn format(value: DictionaryValue, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
-        switch (value) {
-            .WriteWord => |v| {
-                return writer.writeAll(v.word);
-            },
-            .Undo => return writer.writeAll("UNDO"),
-        }
-    }
+    // pub fn format(self: Self, prevTranslation: ?Self, prevStroke: ?Self, writer: anytype) !void {
+    //     switch (self.types) {
+    //         .Raw => {
+    //             return writer.writeAll(self.rawString);
+    //         },
+    //         .UNDO => return writer.writeAll("UNDO"),
+    //         .ValueTypeList => |list| {
+    //             for (list.items) |valueType| {
+    //                 switch (valueType) {
+    //                     .Raw => |range| {
+    //                         writer.writeAll(self.rawString[range.start..range.end]);
+    //                     },
+    //                     .AttachInfix => |range| {},
+    //                     .AttachSuffix => |range| {},
+    //                     .Glue => |range| {},
+    //                     .CapitalizeNext => {},
+    //                     .CapitalizePrev => {},
+    //                     .UncapitalizeNext => {},
+    //                     .UncapitalizePrev => {},
+    //                     .CarryCapitalization => {},
+    //                     .UppercaseNextWord => {},
+    //                     .UppercasePrevWord => {},
+    //                     .SuppressNextSpace => {},
+    //                     .InsertSpace => {},
+    //                     .DoNothing => {},
+    //                     .Currency => |specs| {},
+    //                     .Conditional => |specs| {},
+    //                     .Macro => {},
+    //                 }
+    //             }
+    //         },
+    //     }
+    // }
 };
 
 /// A dictionary is implemented as a tree of DictionaryNodes. Each node has a HashMap whose key

@@ -322,8 +322,8 @@ const StenuraStroke = packed struct {
     sr: bool,
     hash: bool,
     stenomark: bool,
-    _bit1: bool = 1,
-    _bit2: bool = 1,
+    _bit1: bool = true,
+    _bit2: bool = true,
 
     star: bool,
     o: bool,
@@ -331,8 +331,8 @@ const StenuraStroke = packed struct {
     rr: bool,
     h: bool,
     w: bool,
-    _bit3: bool = 1,
-    _bit4: bool = 1,
+    _bit3: bool = true,
+    _bit4: bool = true,
 
     b: bool,
     pl: bool,
@@ -340,8 +340,8 @@ const StenuraStroke = packed struct {
     f: bool,
     u: bool,
     e: bool,
-    _bit5: bool = 1,
-    _bit6: bool = 1,
+    _bit5: bool = true,
+    _bit6: bool = true,
 
     z: bool,
     d: bool,
@@ -349,8 +349,8 @@ const StenuraStroke = packed struct {
     tl: bool,
     g: bool,
     l: bool,
-    _bit7: bool = 1,
-    _bit8: bool = 1,
+    _bit7: bool = true,
+    _bit8: bool = true,
 
     pub fn toChord(self: Self) Chord {
         return .{

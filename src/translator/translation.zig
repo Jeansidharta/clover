@@ -5,6 +5,7 @@ const Dictionary = @import("../dictionary.zig").Dictionary;
 const DictionaryValue = @import("../dictionary.zig").DictionaryValue;
 const Chord = @import("../chords.zig").Chord;
 const DictionaryNode = @import("../dictionary.zig").DictionaryNode;
+const SeenValueType = @import("../dictionary.zig").SeenValueType;
 const XorgClient = @import("../x11.zig").XorgClient;
 const Translator = @import("./init.zig").Translator;
 
@@ -17,17 +18,24 @@ const TranslationType = union(enum) {
     /// Should write the chord the user typed
     rawChord: Chord,
 
-    pub fn format(value: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        switch (value) {
+    fn seenTypes(self: Self) SeenValueType {
+        return switch (self) {
+            .empty | .rawChord => SeenValueType{},
+            .dictValue => |value| value.seenTypes(),
+        };
+    }
+
+    pub fn writeTo(self: Self, previous: Self, writer: anytype) !void {
+        switch (self) {
             .empty => {},
             .dictValue => |dictValue| {
-                try dictValue.format(fmt, options, writer);
+                const previousValues = previous.seenTypes();
+                // if (previousValues.
             },
             .rawChord => |chord| {
-                var chordOptions = options;
+                const chordOptions: std.fmt.FormatOptions = .{ .width = 0 };
                 // Forces the chord to be written in its short form
-                chordOptions.width = 0;
-                try chord.format(fmt, chordOptions, writer);
+                try chord.format("{}", chordOptions, writer);
             },
         }
     }
@@ -56,14 +64,18 @@ pub const Translation = struct {
     allocator: Allocator,
     shouldWrite: TranslationType = .{ .empty = void{} },
     shouldRevert: WriteValueArr,
+    previousTranslation: ?*const Self = null,
+    /// The last chord that created this translation
+    chord: Chord,
     translator: *Translator,
 
-    pub fn createInit(allocator: Allocator, translator: *Translator) !*Self {
+    pub fn createInit(allocator: Allocator, chord: Chord, translator: *Translator) !*Self {
         const translation = try allocator.create(Self);
         translation.* = .{
             .allocator = allocator,
             .shouldRevert = WriteValueArr.init(allocator),
             .translator = translator,
+            .chord = chord,
         };
         return translation;
     }
@@ -73,7 +85,7 @@ pub const Translation = struct {
         self.allocator.destroy(self);
     }
 
-    pub fn writeTo(self: Translation, writerType: type, writer: writerType) !void {
+    pub fn writeTo(self: Self, previous: Self, writerType: type, writer: writerType) !void {
         for (self.shouldRevert.items) |valueToRevert| {
             for (0..valueToRevert.charactersLen() + 1) |_| _ = try writer.writeByte(0x16);
         }
@@ -81,22 +93,16 @@ pub const Translation = struct {
         switch (self.shouldWrite) {
             .empty => {},
             .dictValue => |dictValue| {
-                switch (dictValue.*) {
-                    .WriteWord => |word| {
-                        _ = try writer.writeByte(' ');
-                        _ = try writer.write(word.word);
-                    },
-                    .Undo => {
-                        const firstUndo = self.translator.undoList.popOrNull() orelse return;
-                        defer firstUndo.destroy();
-                        try self.translator.undoState(firstUndo);
+                if (dictValue.types.items.len == 1 and dictValue.types.items[0] == .Undo) {
+                    const firstUndo = self.translator.undoList.popOrNull() orelse return;
+                    defer firstUndo.destroy();
+                    try self.translator.undoState(firstUndo);
 
-                        const secondUndo = self.translator.undoList.popOrNull() orelse return;
-                        defer secondUndo.destroy();
-                        try secondUndo.writeTo(writerType, writer);
-                        try self.translator.undoState(secondUndo);
-                    },
-                }
+                    const secondUndo = self.translator.undoList.popOrNull() orelse return;
+                    defer secondUndo.destroy();
+                    try secondUndo.writeTo(writerType, writer);
+                    try self.translator.undoState(secondUndo);
+                } else try dictValue.writeTo(writerType, writer);
             },
             .rawChord => |chord| {
                 try chord.format("", .{ .width = 0 }, writer);

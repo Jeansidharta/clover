@@ -13,6 +13,8 @@ pub const Undo = @import("./undo.zig").Undo;
 pub const Translator = struct {
     const ArrayList = std.ArrayList(*const DictionaryNode);
     const UndoArrayList = std.ArrayList(*Undo);
+    const TranslationsList = std.ArrayList(*const Translation);
+    const ChordsList = std.ArrayList(*const Chord);
 
     /// Given that the dictionary is implemented as a tree of chords, a "possible branch" is a
     /// branch of the dictionary tree that could still have a word in the next call to the
@@ -25,6 +27,8 @@ pub const Translator = struct {
     rootDictionary: *const DictionaryNode,
 
     undoList: UndoArrayList,
+    translationsHistory: TranslationsList,
+    chordsHistory: ChordsList,
 
     allocator: Allocator,
 
@@ -33,6 +37,8 @@ pub const Translator = struct {
             .possibleBranches = Translator.ArrayList.init(allocator),
             .rootDictionary = rootDictionary,
             .undoList = UndoArrayList.init(allocator),
+            .translationsHistory = TranslationsList.init(allocator),
+            .chordsHistory = ChordsList.init(allocator),
             .allocator = allocator,
         };
     }
@@ -40,8 +46,9 @@ pub const Translator = struct {
     /// Note that this function is not pure. It modifies the internal state of the translator.
     /// That means consecutive two calls with the same chord will probably have a different output.
     pub fn translate(self: *Translator, chord: Chord) !*Translation {
+        try self.chordsHistory.append(chord);
         // The object that will eventually be returned. Starts as an empty translation.
-        var translation = try Translation.createInit(self.allocator, self);
+        var translation = try Translation.createInit(self.allocator, chord, self);
         errdefer translation.destroy();
 
         // Object responsible for holding necessary information for an undo
@@ -85,7 +92,7 @@ pub const Translator = struct {
 
             try translation.shouldRevert.append(.{ .dictValue = &self.possibleBranches.getLast().value.? });
             while (self.possibleBranches.items.len - 1 > index) {
-                // By popping the array, we guarantee the property that the last branch in the array
+                // By popping the array, we guarantee tht property that the last branch in the array
                 // has the word that was last written.
                 const prev = self.possibleBranches.pop();
                 const curr = self.possibleBranches.getLast();
@@ -110,6 +117,8 @@ pub const Translator = struct {
             translation.shouldWrite = .{ .rawChord = chord };
         }
 
+        translation.previousTranslation = self.translationsHistory.items[self.translationsHistory.items.len - 1];
+        try self.translationsHistory.append(translation);
         try self.undoList.append(undo);
         return translation;
     }
