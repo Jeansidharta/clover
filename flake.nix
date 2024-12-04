@@ -18,7 +18,7 @@
       {
         devShell = pkgs.mkShell {
           buildInputs = [
-            zig.outputs.packages.${system}.default
+            zig.outputs.packages.${system}.master
             pkgs.xorg.libX11.dev
             pkgs.xorg.libxcb.dev
             pkgs.glibc.dev

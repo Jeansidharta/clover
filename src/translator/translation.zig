@@ -81,22 +81,16 @@ pub const Translation = struct {
         switch (self.shouldWrite) {
             .empty => {},
             .dictValue => |dictValue| {
-                switch (dictValue.*) {
-                    .WriteWord => |word| {
-                        _ = try writer.writeByte(' ');
-                        _ = try writer.write(word.word);
-                    },
-                    .Undo => {
-                        const firstUndo = self.translator.undoList.popOrNull() orelse return;
-                        defer firstUndo.destroy();
-                        try self.translator.undoState(firstUndo);
+                if (dictValue.isUndo()) {
+                    const firstUndo = self.translator.undoList.popOrNull() orelse return;
+                    defer firstUndo.destroy();
+                    try self.translator.undoState(firstUndo);
 
-                        const secondUndo = self.translator.undoList.popOrNull() orelse return;
-                        defer secondUndo.destroy();
-                        try secondUndo.writeTo(writerType, writer);
-                        try self.translator.undoState(secondUndo);
-                    },
-                }
+                    const secondUndo = self.translator.undoList.popOrNull() orelse return;
+                    defer secondUndo.destroy();
+                    try secondUndo.writeTo(writerType, writer);
+                    try self.translator.undoState(secondUndo);
+                } else try dictValue.writeTo(writerType, writer);
             },
             .rawChord => |chord| {
                 try chord.format("", .{ .width = 0 }, writer);

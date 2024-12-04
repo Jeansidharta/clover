@@ -2,27 +2,119 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Chord = @import("./chords.zig").Chord;
 
-pub const DictionaryValue = union(enum) {
+const ValueType = union(enum) {
     const Self = @This();
 
-    WriteWord: struct {
-        word: []const u8,
-        allocator: Allocator,
-    },
-    Undo,
+    const Range = struct {
+        start: usize,
+        end: usize,
+        pub fn init(start: usize, end: usize) Range {
+            return .{ .start = start, .end = end };
+        }
+    };
+
+    Raw: Range,
+    AttachPrefix: Range,
+    AttachInfix: Range,
+    AttachSuffix: Range,
+
+    GluePrefix: Range,
+    GlueInfix: Range,
+    GlueSuffix: Range,
+    CapitalizeNext,
+    CapitalizePrev,
+    UncapitalizeNext,
+    UncapitalizePrev,
+    CarryCapitalization,
+    UppercaseNextWord,
+    UppercasePrevWord,
+    SuppressNextSpace,
+    InsertSpace,
+    DoNothing,
+    Currency: struct { prefix: Range, suffix: Range },
+    Conditional: struct { regex: Range, ifTrue: Range, ifFalse: Range },
+    Macro,
+
+    pub fn charLength(self: Self) usize {
+        switch (self) {}
+    }
+};
+
+pub const DictionaryValue = struct {
+    const Self = @This();
+    const ValueTypeList = std.ArrayList(ValueType);
+    const TypesUnion = union(enum) {
+        // This is to prevent an allocation in the very common case where the translation is just a raw word.
+        ValueTypeList: ValueTypeList,
+        Raw,
+    };
+
+    allocator: Allocator,
+    rawString: []const u8,
+    types: TypesUnion,
+
+    pub fn isUndo(self: Self) bool {
+        return std.mem.eql(u8, self.rawString, "=undo");
+    }
+    pub fn writeTo(self: Self, writerType: type, writer: writerType) !void {
+        switch (self) {
+            .WriteWord => |word| {
+                _ = try writer.writeByte(' ');
+                _ = try writer.write(word.word);
+            },
+        }
+    }
+
+    fn parseTypeString(string: []const u8) !ValueType {
+        if (string.len == 0) return .{ .DoNothing = {} };
+        // const needles = [_][]u8{ "^~|", "^" };
+        if (std.mem.startsWith(u8, string, "^")) return .{ .AttachPrefix = .init(0, 0) };
+        return error.unknown;
+    }
+
+    fn parseTypes(allocator: Allocator, rawString: []const u8) !ValueTypeList {
+        var types = ValueTypeList.init(allocator);
+        errdefer types.deinit();
+
+        var firstCharInBraces: ?usize = null;
+        var firstCharOutsideBraces: usize = 0;
+        for (rawString, 0..) |char, index| {
+            switch (char) {
+                '{' => {
+                    if (firstCharOutsideBraces != index)
+                        try types.append(.{ .Raw = .{
+                            .start = firstCharOutsideBraces,
+                            .end = index - 1,
+                        } });
+                    if (firstCharInBraces) |_| return error.cannotNestType;
+                    firstCharInBraces = index + 1;
+                },
+                '}' => if (firstCharInBraces) |f| {
+                    try types.append(try parseTypeString(rawString[f..index]));
+                    firstCharInBraces = null;
+                    firstCharOutsideBraces = index + 1;
+                } else return error.MissingOpenBracket,
+                else => {},
+            }
+        }
+        if (firstCharInBraces) |_| return error.MissingCloseBracket;
+        if (firstCharOutsideBraces != rawString.len - 1)
+            try types.append(.{ .Raw = .{ .start = firstCharOutsideBraces, .end = rawString.len - 1 } });
+        return types;
+    }
 
     /// Does not take ownership of string
     pub fn fromString(allocator: Allocator, string: []const u8) !DictionaryValue {
-        if (std.mem.eql(u8, string, "=undo")) {
-            return .{ .Undo = void{} };
-        } else {
-            return .{
-                .WriteWord = .{
-                    .word = try allocator.dupe(u8, string),
-                    .allocator = allocator,
-                },
-            };
-        }
+        const types: TypesUnion =
+            if (std.mem.eql(u8, string, "=undo")) .{ .Raw = {} } else .{
+            .ValueTypeList = try parseTypes(allocator, string),
+        };
+
+        return .{
+            .allocator = allocator,
+            .rawString = try allocator.dupe(u8, string),
+            .types = types,
+        };
     }
 
     pub fn deinit(self: *DictionaryValue) void {
@@ -46,12 +138,15 @@ pub const DictionaryValue = union(enum) {
     }
 
     pub fn charactersLen(self: DictionaryValue) usize {
-        switch (self) {
-            .WriteWord => |writeWord| {
-                return writeWord.word.len;
-            },
-            .Undo => {
-                return 0;
+        if (self.isUndo()) return 0;
+        switch (self.types) {
+            .Raw => return self.rawString.len,
+            .ValueTypeList => |list| {
+                var sum: usize = 0;
+                for (list.items) |valueType| {
+                    sum += valueType.charLength();
+                }
+                return sum;
             },
         }
     }
@@ -59,11 +154,12 @@ pub const DictionaryValue = union(enum) {
     pub fn format(value: DictionaryValue, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        switch (value) {
-            .WriteWord => |v| {
-                return writer.writeAll(v.word);
+        if (value.isUndo()) return writer.writeAll("UNDO");
+        switch (value.types) {
+            .Raw => {
+                return writer.writeAll(value.rawString);
             },
-            .Undo => return writer.writeAll("UNDO"),
+            .ValueTypeList => |list| {},
         }
     }
 };
